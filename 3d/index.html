@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>霓虹碰碰车 · 3D联机对战</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cbox x='6' y='10' width='20' height='12' rx='3' fill='%2322d3ee'/%3E%3C/svg%3E">
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0e1a; --panel:#141930; --line:#2a3358;
+    --cyan:#22d3ee; --orange:#fb923c; --txt:#e2e8f0; --dim:#8b95b8;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    user-select:none;
+  }
+  #app{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  .screen{display:none;width:min(92vw,420px);text-align:center;z-index:10}
+  .screen.active{display:block}
+  h1{
+    font-size:38px;letter-spacing:4px;font-weight:900;
+    background:linear-gradient(90deg,var(--cyan),#a5f3fc 50%,var(--orange));
+    -webkit-background-clip:text;background-clip:text;color:transparent;margin-bottom:6px;
+  }
+  .sub{color:var(--dim);font-size:14px;margin-bottom:28px;letter-spacing:1px}
+  .btn{
+    display:block;width:100%;padding:15px;border:1px solid var(--line);
+    background:var(--panel);color:var(--txt);font-size:16px;letter-spacing:2px;
+    border-radius:12px;cursor:pointer;margin-bottom:12px;transition:.15s;font-family:inherit;
+  }
+  .btn.primary{background:linear-gradient(135deg,#0891b2,#06b6d4);border-color:transparent;color:#04121a;font-weight:700}
+  .btn:active{transform:scale(.97)}
+  .room-code{
+    font-size:40px;letter-spacing:10px;font-weight:800;color:var(--cyan);
+    padding:18px;border:1px dashed var(--line);border-radius:12px;margin:14px 0;
+    font-family:"SF Mono",Consolas,monospace;text-shadow:0 0 18px rgba(34,211,238,.6);
+  }
+  input{
+    width:100%;padding:14px;background:#0d1226;border:1px solid var(--line);
+    border-radius:12px;color:var(--txt);font-size:22px;letter-spacing:8px;text-align:center;
+    text-transform:uppercase;font-family:"SF Mono",Consolas,monospace;margin-bottom:12px;outline:none;
+  }
+  input:focus{border-color:var(--cyan)}
+  .tip{color:var(--dim);font-size:12px;line-height:1.7;margin-top:18px}
+  .err{color:#f87171;font-size:13px;min-height:18px;margin-top:8px}
+  .status{color:var(--cyan);font-size:13px;margin-top:14px;min-height:18px}
+
+  #gameWrap{display:none;position:fixed;inset:0}
+  #gameWrap.active{display:block}
+  #hud{
+    position:fixed;top:12px;left:50%;transform:translateX(-50%);
+    display:flex;gap:24px;align-items:center;z-index:5;
+    background:rgba(10,13,26,.7);padding:8px 20px;border-radius:20px;
+    border:1px solid var(--line);backdrop-filter:blur(8px);
+  }
+  .score{font-family:"SF Mono",Consolas,monospace;font-size:24px;font-weight:800}
+  .score.p1{color:var(--cyan)} .score.p2{color:var(--orange)}
+  .who{color:var(--dim);font-size:12px}
+  canvas{display:block}
+
+  #touch{display:none;position:fixed;inset:0;pointer-events:none;z-index:10}
+  body.touch #touch{display:block}
+  .tbtn{
+    position:absolute;pointer-events:auto;width:60px;height:60px;border-radius:50%;
+    background:rgba(34,211,238,.15);border:1px solid rgba(34,211,238,.5);color:var(--cyan);
+    display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;
+  }
+  #tUp{left:50%;transform:translateX(-50%);bottom:180px}
+  #tLeft{left:calc(50% - 80px);bottom:110px}
+  #tDown{left:50%;transform:translateX(-50%);bottom:110px}
+  #tRight{left:calc(50% + 20px);bottom:110px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="screen active" id="scrMenu">
+    <h1>霓虹碰碰车</h1>
+    <div class="sub">NEON RUMBLE · 3D联机对战</div>
+    <button class="btn primary" id="btnCreate">创建房间</button>
+    <button class="btn" id="btnJoin">加入房间</button>
+    <div class="tip">两人各开一个本页面<br>W/S 油门刹车 · A/D 转向<br>把对方撞出场地得分 · 先得 3 分获胜</div>
+  </div>
+  <div class="screen" id="scrHost">
+    <h1 style="font-size:28px">房间已创建</h1>
+    <div class="sub">把房间码发给朋友</div>
+    <div class="room-code" id="roomCode">----</div>
+    <div class="status" id="hostStatus">等待对方加入…</div>
+    <div class="err" id="hostErr"></div>
+    <button class="btn" id="btnCancelHost" style="margin-top:24px">取消</button>
+  </div>
+  <div class="screen" id="scrJoin">
+    <h1 style="font-size:28px">加入房间</h1>
+    <div class="sub">输入对方给你的房间码</div>
+    <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off">
+    <button class="btn primary" id="btnDoJoin">加入</button>
+    <button class="btn" id="btnBack">返回</button>
+    <div class="err" id="joinErr"></div>
+    <div class="status" id="joinStatus"></div>
+  </div>
+  <div class="screen" id="scrOver">
+    <h1 id="overTitle">胜利</h1>
+    <div class="sub" id="overSub"></div>
+    <button class="btn primary" id="btnAgain">再来一局</button>
+    <button class="btn" id="btnLeave">离开房间</button>
+  </div>
+</div>
+
+<div id="gameWrap">
+  <div id="hud">
+    <span class="who" id="hudRole">你</span>
+    <span><span class="score p1" id="s1">0</span> : <span class="score p2" id="s2">0</span></span>
+    <span class="who" id="hudOpp">对手</span>
+  </div>
+</div>
+
+<div id="touch">
+  <div class="tbtn" id="tUp">&#9650;</div>
+  <div class="tbtn" id="tLeft">&#9664;</div>
+  <div class="tbtn" id="tDown">&#9660;</div>
+  <div class="tbtn" id="tRight">&#9654;</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const scr = {menu:$('scrMenu'),host:$('scrHost'),join:$('scrJoin'),over:$('scrOver')};
+const gameWrap = $('gameWrap');
+function show(name){
+  Object.values(scr).forEach(s=>s.classList.remove('active'));
+  gameWrap.classList.remove('active');
+  if(name && scr[name]) scr[name].classList.add('active');
+  if(name==='game') gameWrap.classList.add('active');
+}
+if('ontouchstart' in window || navigator.maxTouchPoints>0) document.body.classList.add('touch');
+
+/* ===== 输入 ===== */
+const keys = {up:false,down:false,left:false,right:false};
+const keyMap = {
+  KeyW:'up', ArrowUp:'up',
+  KeyS:'down', ArrowDown:'down',
+  KeyA:'left', ArrowLeft:'left',
+  KeyD:'right', ArrowRight:'right'
+};
+window.addEventListener('keydown', e=>{
+  const k = keyMap[e.code];
+  if(k){ keys[k]=true; e.preventDefault(); }
+});
+window.addEventListener('keyup', e=>{
+  const k = keyMap[e.code];
+  if(k) keys[k]=false;
+});
+function bindDir(id, prop){
+  const el = $(id);
+  const on = e=>{ e.preventDefault(); keys[prop]=true; };
+  const off = e=>{ e.preventDefault(); keys[prop]=false; };
+  el.addEventListener('touchstart', on, {passive:false});
+  el.addEventListener('touchend', off);
+  el.addEventListener('touchcancel', off);
+  el.addEventListener('mousedown', on);
+  el.addEventListener('mouseup', off);
+  el.addEventListener('mouseleave', off);
+}
+bindDir('tUp','up'); bindDir('tDown','down');
+bindDir('tLeft','left'); bindDir('tRight','right');
+
+/* ===== 联机 ===== */
+let peer=null, conn=null, role=null;
+let remoteInput = null;
+let remoteState = null;
+const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function genCode(){ let s=''; for(let i=0;i<4;i++) s+=CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]; return s; }
+function cleanup(){
+  if(conn){try{conn.close();}catch(e){}}
+  if(peer){try{peer.destroy();}catch(e){}}
+  conn=null; peer=null; role=null; G=null; remoteState=null;
+}
+
+$('btnCreate').onclick = ()=>{
+  show('host'); $('hostErr').textContent=''; $('hostStatus').textContent='正在创建房间…';
+  const code = genCode();
+  $('roomCode').textContent = code;
+  try{ peer = new Peer('car3d-'+code.toLowerCase(), {debug:0}); }
+  catch(e){ $('hostErr').textContent='网络组件加载失败'; return; }
+  peer.on('open', ()=> $('hostStatus').textContent='房间已就绪，等待对方加入…');
+  peer.on('connection', c=>{
+    conn = c;
+    conn.on('open', ()=>{ $('hostStatus').textContent='对方已加入，开始！'; startAsHost(); });
+    conn.on('data', d=>{ if(d&&d.t==='i') remoteInput = d; });
+    conn.on('close', ()=> onLeave('对方已离开'));
+    conn.on('error', ()=> onLeave('连接断开'));
+  });
+  peer.on('error', err=>{
+    if(err.type==='unavailable-id') $('hostErr').textContent='房间码被占用，刷新重试';
+    else if(err.type==='network'||err.type==='server-unavailable') $('hostErr').textContent='联机服务器连接失败';
+    else $('hostErr').textContent='错误：'+err.type;
+  });
+};
+$('btnCancelHost').onclick = ()=>{ cleanup(); show('menu'); };
+
+$('btnJoin').onclick = ()=>{ show('join'); $('codeInput').focus(); };
+$('btnBack').onclick = ()=>{ cleanup(); show('menu'); };
+$('btnDoJoin').onclick = ()=>{
+  const code = $('codeInput').value.trim().toUpperCase();
+  $('joinErr').textContent=''; $('joinStatus').textContent='正在连接…';
+  if(code.length!==4){ $('joinErr').textContent='请输入 4 位房间码'; return; }
+  try{ peer = new Peer({debug:0}); }
+  catch(e){ $('joinErr').textContent='网络组件加载失败'; return; }
+  peer.on('open', ()=>{
+    conn = peer.connect('car3d-'+code.toLowerCase(), {reliable:true});
+    conn.on('open', ()=>{ $('joinStatus').textContent='已连接！'; role='guest'; });
+    conn.on('data', d=>{
+      if(!d) return;
+      if(d.t==='go') startAsGuest();
+      else if(d.t==='s') remoteState = d;
+      else if(d.t==='over') onGameOver(d.w);
+      else if(d.t==='again') startAsHost();
+    });
+    conn.on('close', ()=> onLeave('房主已离开'));
+    conn.on('error', ()=> $('joinErr').textContent='找不到该房间或连接失败');
+  });
+  peer.on('error', err=>{
+    if(err.type==='peer-unavailable') $('joinErr').textContent='找不到该房间，请核对房间码';
+    else $('joinErr').textContent='错误：'+err.type;
+    $('joinStatus').textContent='';
+  });
+};
+function onLeave(msg){ alert(msg); cleanup(); show('menu'); }
+
+/* ===== 游戏常量 ===== */
+const ARENA = 38;       // 围墙边界
+const OUT = 44;         // 出界判定
+const CAR_R = 2;        // 车碰撞半径
+const ACCEL = 0.18;
+const BRAKE = 0.3;
+const FRICTION = 0.985;
+const MAX_SPEED = 0.9;
+const TURN_SPEED = 0.045;
+const WIN_SCORE = 3;
+
+/* ===== 游戏状态（host 权威） ===== */
+let G = null;
+function newCar(x,z,angle){
+  return {x,z,angle,vx:0,vz:0,score:0,out:false};
+}
+function newGame(){
+  G = {
+    c1: newCar(-15, 0, 0),
+    c2: newCar(15, 0, Math.PI),
+    score:[0,0],
+    over:false, overSent:false, winner:null
+  };
+}
+function stepCar(c, input){
+  // 转向
+  if(input.left) c.angle -= TURN_SPEED * Math.min(1, Math.abs(c.vx)/0.3);
+  if(input.right) c.angle += TURN_SPEED * Math.min(1, Math.abs(c.vx)/0.3);
+  // 油门
+  if(input.up){
+    c.vx += Math.cos(c.angle)*ACCEL;
+    c.vz += Math.sin(c.angle)*ACCEL;
+  }
+  if(input.down){
+    c.vx -= Math.cos(c.angle)*BRAKE*0.5;
+    c.vz -= Math.sin(c.angle)*BRAKE*0.5;
+  }
+  // 摩擦
+  c.vx *= FRICTION;
+  c.vz *= FRICTION;
+  // 限速
+  const sp = Math.hypot(c.vx, c.vz);
+  if(sp > MAX_SPEED){ c.vx = c.vx/sp*MAX_SPEED; c.vz = c.vz/sp*MAX_SPEED; }
+  // 移动
+  c.x += c.vx;
+  c.z += c.vz;
+}
+function resolveCollision(){
+  const a = G.c1, b = G.c2;
+  const dx = b.x-a.x, dz = b.z-a.z;
+  const dist = Math.hypot(dx,dz);
+  const minDist = CAR_R*2;
+  if(dist < minDist && dist > 0.01){
+    const nx = dx/dist, nz = dz/dist;
+    const overlap = (minDist-dist)/2;
+    a.x -= nx*overlap; a.z -= nz*overlap;
+    b.x += nx*overlap; b.z += nz*overlap;
+    // 交换法向速度分量（简单弹性碰撞）
+    const avn = a.vx*nx + a.vz*nz;
+    const bvn = b.vx*nx + b.vz*nz;
+    const diff = bvn - avn;
+    a.vx += diff*nx; a.vz += diff*nz;
+    b.vx -= diff*nx; b.vz -= diff*nz;
+  }
+}
+function checkWallsAndOut(){
+  for(let i=0;i<2;i++){
+    const c = i===0?G.c1:G.c2;
+    // 围墙反弹
+    if(c.x < -ARENA){ c.x = -ARENA; c.vx = Math.abs(c.vx)*0.5; }
+    if(c.x > ARENA){ c.x = ARENA; c.vx = -Math.abs(c.vx)*0.5; }
+    if(c.z < -ARENA){ c.z = -ARENA; c.vz = Math.abs(c.vz)*0.5; }
+    if(c.z > ARENA){ c.z = ARENA; c.vz = -Math.abs(c.vz)*0.5; }
+    // 出界
+    if(Math.abs(c.x) > OUT || Math.abs(c.z) > OUT){
+      G.score[1-i]++;  // 对方得分
+      // 重生
+      c.x = i===0?-15:15;
+      c.z = 0;
+      c.vx = 0; c.vz = 0;
+      c.angle = i===0?0:Math.PI;
+      if(G.score[1-i] >= WIN_SCORE){ G.over=true; G.winner=1-i; }
+    }
+  }
+}
+let lastTick = 0;
+function gameLoop(now){
+  if(role!=='host' || !G || G.over) return;
+  if(now - lastTick < 16) return;
+  lastTick = now;
+  stepCar(G.c1, keys);
+  stepCar(G.c2, remoteInput||{up:false,down:false,left:false,right:false});
+  resolveCollision();
+  checkWallsAndOut();
+}
+
+/* ===== Three.js 场景 ===== */
+let renderer, scene, camera, car1Mesh, car2Mesh;
+function initThree(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0d1a);
+  scene.fog = new THREE.Fog(0x0a0d1a, 80, 200);
+  camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 500);
+  camera.position.set(0, 70, 55);
+  camera.lookAt(0,0,0);
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  gameWrap.appendChild(renderer.domElement);
+  // 灯光
+  scene.add(new THREE.AmbientLight(0x404060, 1.5));
+  const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+  dir.position.set(30,60,30);
+  dir.castShadow = true;
+  scene.add(dir);
+  // 地面
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(OUT*2+20, OUT*2+20),
+    new THREE.MeshStandardMaterial({color:0x111827, roughness:0.9})
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.receiveShadow = true;
+  scene.add(ground);
+  // 网格线
+  const grid = new THREE.GridHelper(OUT*2, 20, 0x22d3ee, 0x1e293b);
+  grid.position.y = 0.02;
+  scene.add(grid);
+  // 围墙
+  const wallMat = new THREE.MeshStandardMaterial({color:0x3b82f6, transparent:true, opacity:0.3});
+  const wallH = 3;
+  const walls = [
+    [0, wallH/2, -ARENA-1, OUT*2+2, wallH, 2],
+    [0, wallH/2, ARENA+1, OUT*2+2, wallH, 2],
+    [-ARENA-1, wallH/2, 0, 2, wallH, OUT*2+2],
+    [ARENA+1, wallH/2, 0, 2, wallH, OUT*2+2],
+  ];
+  for(const [x,y,z,w,h,d] of walls){
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), wallMat);
+    wall.position.set(x,y,z);
+    scene.add(wall);
+  }
+  // 两辆车
+  car1Mesh = makeCar(0x22d3ee);
+  car2Mesh = makeCar(0xfb923c);
+  scene.add(car1Mesh, car2Mesh);
+  window.addEventListener('resize', ()=>{
+    camera.aspect = innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
+}
+function makeCar(color){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(2.2, 1, 4),
+    new THREE.MeshStandardMaterial({color:color, emissive:color, emissiveIntensity:0.3})
+  );
+  body.position.y = 0.7;
+  body.castShadow = true;
+  g.add(body);
+  const top = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 0.8, 2),
+    new THREE.MeshStandardMaterial({color:0xffffff, emissive:color, emissiveIntensity:0.1})
+  );
+  top.position.y = 1.5;
+  g.add(top);
+  return g;
+}
+
+/* ===== 开始/结束 ===== */
+function startAsHost(){
+  role='host'; newGame();
+  lastTick = performance.now();
+  show('game');
+  $('hudRole').textContent='你（青）'; $('hudOpp').textContent='对手（橙）';
+  if(conn&&conn.open) conn.send({t:'go'});
+}
+function startAsGuest(){
+  show('game');
+  $('hudRole').textContent='你（橙）'; $('hudOpp').textContent='对手（青）';
+}
+function onGameOver(w){
+  G=null; remoteState=null;
+  const me = role==='host'?0:1;
+  show('over');
+  if(w===me){
+    $('overTitle').textContent='胜 利';
+    $('overTitle').style.color='#4ade80';
+    $('overSub').textContent='你把对方撞出去了';
+  }else{
+    $('overTitle').textContent='败 北';
+    $('overTitle').style.color='#f87171';
+    $('overSub').textContent='下一局赢回来';
+  }
+}
+$('btnAgain').onclick = ()=>{
+  if(role==='host') startAsHost();
+  else{ if(conn&&conn.open) conn.send({t:'again'}); show('game'); }
+};
+$('btnLeave').onclick = ()=>{ cleanup(); show('menu'); };
+
+/* ===== 渲染循环 ===== */
+let last=performance.now(), lastSend=0;
+function loop(now){
+  const dt = now-last; last=now;
+  gameLoop(now);
+
+  if(role==='host' && G){
+    if(G.over && !G.overSent){
+      G.overSent=true;
+      if(conn&&conn.open) conn.send({t:'over', w:G.winner});
+      onGameOver(G.winner);
+    }
+    if(conn && conn.open && now-lastSend>=50){
+      lastSend=now;
+      conn.send({t:'s',
+        c1:{x:G.c1.x,z:G.c1.z,a:G.c1.angle},
+        c2:{x:G.c2.x,z:G.c2.z,a:G.c2.angle},
+        s:G.score
+      });
+    }
+  }
+  if(role==='guest' && conn && conn.open){
+    conn.send({t:'i', up:keys.up, down:keys.down, left:keys.left, right:keys.right});
+  }
+
+  // 渲染
+  if(renderer){
+    let c1, c2, score;
+    if(role==='host' && G){
+      c1 = G.c1; c2 = G.c2; score = G.score;
+    }else if(role==='guest' && remoteState){
+      c1 = {x:remoteState.c1.x, z:remoteState.c1.z, angle:remoteState.c1.a};
+      c2 = {x:remoteState.c2.x, z:remoteState.c2.z, angle:remoteState.c2.a};
+      score = remoteState.s;
+    }
+    if(c1 && car1Mesh){
+      car1Mesh.position.set(c1.x, 0, c1.z);
+      car1Mesh.rotation.y = -c1.angle;
+      car2Mesh.position.set(c2.x, 0, c2.z);
+      car2Mesh.rotation.y = -c2.angle;
+      $('s1').textContent = score[0];
+      $('s2').textContent = score[1];
+    }
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(loop);
+}
+
+// 初始化 Three.js（游戏开始时才渲染，但场景提前建）
+initThree();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
